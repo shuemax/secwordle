@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>SecWordle (Security+ 701)</title>
+  <title>Security+ Wordle</title>
   <style>
     body { font-family: system-ui, Arial; background:#0b0f19; color:#e8eefc; display:flex; justify-content:center; }
     .wrap { width:min(720px, 92vw); margin:24px auto; }
@@ -40,7 +40,7 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>SecWordle</h1>
+    <h1>Security+ Wordle</h1>
     <div class="card">
       <div class="prompt" id="prompt"></div>
       <div class="meta">
@@ -69,8 +69,8 @@
 const ROUNDS = [
   {
     topic: "Threats",
-    prompt: "Attack where an attacker tricks users into revealing credentials: _____.",
-    answer: "PHISH"
+    prompt: "Malware-controlled machines acting together",
+    answer: "BOTS"
   },
   {
     topic: "Threats",
@@ -78,9 +78,9 @@ const ROUNDS = [
     answer: "SPOOF"
   },
   {
-    topic: "Cryptography",
-    prompt: "Integrity mechanism using a keyed hash: _____.",
-    answer: "HMACS" // 5 letters so it fits the board (HMAC + S)
+    topic: "Threats",
+    prompt: "Attack that tricks users into clicking malicious links",
+    answer: "PHISH" // 5 letters so it fits the board (HMAC + S)
   },
   {
     topic: "Authentication",
