@@ -57,17 +57,21 @@
       display:flex;
       align-items:center;
       justify-content:center;
+      transition: transform 0.04s ease, filter 0.08s ease, box-shadow 0.08s ease;
     }
     .key.wide { min-width:72px; }
-    .key:hover { filter:brightness(1.08); }
+
+    /* Key highlight (pressed) */
+    .key.pressed {
+      transform: translateY(1px) scale(0.98);
+      filter:brightness(1.18);
+      box-shadow: 0 0 0 2px rgba(232, 238, 252, 0.18) inset;
+    }
 
     /* Match tile colors for key status */
     .key.correct { background:#1f7a3a; border-color:#1f7a3a; }
     .key.present { background:#b58900; border-color:#b58900; }
     .key.absent  { background:#2a334a; border-color:#2a334a; opacity:.9; }
-
-    /* Optional: hide text input on mobile if you want (leave visible for now) */
-    /* @media (max-width: 520px){ .controls input{ width:100%; } } */
   </style>
 </head>
 <body>
@@ -84,12 +88,12 @@
       <div class="grid" id="grid"></div>
 
       <div class="controls">
-        <input id="guess" maxlength="5" placeholder="GUESS" autocomplete="off" />
+        <!-- readonly prevents double-typing; JS controls the value -->
+        <input id="guess" maxlength="5" placeholder="GUESS" autocomplete="off" readonly />
         <button id="submit">Submit</button>
         <button id="new">New Round</button>
       </div>
 
-      <!-- On-screen keyboard -->
       <div class="keyboard" id="keyboard"></div>
 
       <div class="msg" id="msg"></div>
@@ -139,6 +143,7 @@ function buildKeyboard() {
   KB_LAYOUT.forEach(rowKeys => {
     const row = document.createElement("div");
     row.className = "kb-row";
+
     rowKeys.forEach(k => {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -147,11 +152,44 @@ function buildKeyboard() {
       btn.textContent = k === "DEL" ? "⌫" : k;
       if (k === "ENTER" || k === "DEL") btn.classList.add("wide");
 
+      // Click highlight (like Wordle)
+      btn.addEventListener("mousedown", () => pressVisual(k));
+      btn.addEventListener("mouseup", () => releaseVisual(k));
+      btn.addEventListener("mouseleave", () => releaseVisual(k));
+
+      // Touch highlight
+      btn.addEventListener("touchstart", (e) => { e.preventDefault(); pressVisual(k); }, { passive:false });
+      btn.addEventListener("touchend", () => releaseVisual(k));
+
+      // Actual input
       btn.addEventListener("click", () => handleKeyPress(k));
+
       row.appendChild(btn);
     });
+
     keyboardEl.appendChild(row);
   });
+}
+
+function getKeyButton(k) {
+  return keyboardEl.querySelector(`.key[data-key="${k}"]`);
+}
+
+function pressVisual(k) {
+  const btn = getKeyButton(k);
+  if (!btn) return;
+  btn.classList.add("pressed");
+}
+
+function releaseVisual(k) {
+  const btn = getKeyButton(k);
+  if (!btn) return;
+  btn.classList.remove("pressed");
+}
+
+function flashKey(k) {
+  pressVisual(k);
+  window.setTimeout(() => releaseVisual(k), 90);
 }
 
 function handleKeyPress(k) {
@@ -163,15 +201,12 @@ function handleKeyPress(k) {
   }
   if (k === "DEL") {
     guessEl.value = guessEl.value.slice(0, -1);
-    guessEl.focus();
     return;
   }
-  // Letter
   if (/^[A-Z]$/.test(k)) {
     if (guessEl.value.length < WORD_LEN) {
       guessEl.value += k;
     }
-    guessEl.focus();
   }
 }
 
@@ -182,7 +217,6 @@ function setKeyStatus(letter, status) {
 }
 
 function renderKeyboard() {
-  // Clear all status classes then apply best-known state
   const keys = keyboardEl.querySelectorAll(".key");
   keys.forEach(k => {
     k.classList.remove("absent","present","correct");
@@ -208,7 +242,6 @@ function pickRound() {
   renderKeyboard();
   setMessage("New round started.");
   guessEl.value = "";
-  guessEl.focus();
 }
 
 function renderHeader() {
@@ -257,7 +290,6 @@ function evaluateGuess(guess, answer) {
 
   for (const ch of answer) counts[ch] = (counts[ch] || 0) + 1;
 
-  // correct pass
   for (let i = 0; i < WORD_LEN; i++) {
     if (guess[i] === answer[i]) {
       res[i] = "correct";
@@ -265,7 +297,6 @@ function evaluateGuess(guess, answer) {
     }
   }
 
-  // present pass
   for (let i = 0; i < WORD_LEN; i++) {
     if (res[i] === "correct") continue;
     const ch = guess[i];
@@ -280,9 +311,7 @@ function evaluateGuess(guess, answer) {
 
 function applyKeyboardFromGuess(word, evals) {
   for (let i = 0; i < WORD_LEN; i++) {
-    const ch = word[i];
-    const st = evals[i];
-    setKeyStatus(ch, st);
+    setKeyStatus(word[i], evals[i]);
   }
   renderKeyboard();
 }
@@ -290,7 +319,7 @@ function applyKeyboardFromGuess(word, evals) {
 function submitGuess() {
   if (finished) return;
 
-  let g = guessEl.value.trim().toUpperCase();
+  const g = guessEl.value.trim().toUpperCase();
 
   if (g.length !== WORD_LEN) {
     setMessage(`Guess must be exactly ${WORD_LEN} letters.`);
@@ -307,7 +336,6 @@ function submitGuess() {
   applyKeyboardFromGuess(g, evals);
 
   guessEl.value = "";
-  guessEl.focus();
 
   if (g === answer) {
     finished = true;
@@ -328,22 +356,41 @@ function submitGuess() {
 document.getElementById("submit").addEventListener("click", submitGuess);
 document.getElementById("new").addEventListener("click", pickRound);
 
-// Physical keyboard support (optional + nice)
+// Physical keyboard support + highlight
 document.addEventListener("keydown", (e) => {
   if (finished) return;
 
   const key = e.key;
 
-  if (key === "Enter") return submitGuess();
+  if (key === "Enter") {
+    e.preventDefault();
+    flashKey("ENTER");
+    submitGuess();
+    return;
+  }
+
   if (key === "Backspace") {
+    e.preventDefault();
+    flashKey("DEL");
     guessEl.value = guessEl.value.slice(0, -1);
     return;
   }
 
   const letter = key.toUpperCase();
   if (/^[A-Z]$/.test(letter)) {
+    e.preventDefault();
+    flashKey(letter);
     if (guessEl.value.length < WORD_LEN) guessEl.value += letter;
   }
+});
+
+document.addEventListener("keyup", (e) => {
+  // If you hold a key down, this helps remove pressed state fast
+  const key = e.key;
+  if (key === "Enter") releaseVisual("ENTER");
+  if (key === "Backspace") releaseVisual("DEL");
+  const letter = key.toUpperCase();
+  if (/^[A-Z]$/.test(letter)) releaseVisual(letter);
 });
 
 // Init
