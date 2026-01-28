@@ -13,15 +13,17 @@
     .meta { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; opacity:.85; font-size:13px; }
     .grid { display:grid; gap:8px; margin-top:14px; }
     .row { display:grid; grid-template-columns: repeat(5, 1fr); gap:8px; }
+
     .tile {
       height:56px; border-radius:10px; border:1px solid #2c3e69;
       display:flex; align-items:center; justify-content:center;
       font-size:22px; font-weight:700; text-transform:uppercase;
       background:#0d1428;
+      user-select:none;
     }
     .tile.correct { background:#1f7a3a; border-color:#1f7a3a; }
     .tile.present { background:#b58900; border-color:#b58900; }
-    .tile.absent  { background:#2a334a; border-color:#2a334a; opacity:.75; }
+    .tile.absent  { background:#2a334a; border-color:#2a334a; opacity:.85; }
 
     .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px; }
     input {
@@ -36,6 +38,36 @@
     .msg { margin-top:10px; min-height:22px; font-size:14px; opacity:.9; }
     .footer { opacity:.7; font-size:12px; margin-top:14px; }
     .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; padding:2px 6px; border-radius:6px; background:#0d1428; border:1px solid #2c3e69; }
+
+    /* On-screen keyboard */
+    .keyboard { margin-top:14px; display:grid; gap:8px; }
+    .kb-row { display:flex; gap:6px; justify-content:center; flex-wrap:nowrap; }
+    .key {
+      min-width:34px;
+      height:44px;
+      padding:0 10px;
+      border-radius:10px;
+      border:1px solid #2c3e69;
+      background:#172447;
+      color:#e8eefc;
+      font-weight:700;
+      text-transform:uppercase;
+      cursor:pointer;
+      user-select:none;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .key.wide { min-width:72px; }
+    .key:hover { filter:brightness(1.08); }
+
+    /* Match tile colors for key status */
+    .key.correct { background:#1f7a3a; border-color:#1f7a3a; }
+    .key.present { background:#b58900; border-color:#b58900; }
+    .key.absent  { background:#2a334a; border-color:#2a334a; opacity:.9; }
+
+    /* Optional: hide text input on mobile if you want (leave visible for now) */
+    /* @media (max-width: 520px){ .controls input{ width:100%; } } */
   </style>
 </head>
 <body>
@@ -56,6 +88,10 @@
         <button id="submit">Submit</button>
         <button id="new">New Round</button>
       </div>
+
+      <!-- On-screen keyboard -->
+      <div class="keyboard" id="keyboard"></div>
+
       <div class="msg" id="msg"></div>
       <div class="footer">
         Tip: press <span class="kbd">Enter</span> to submit.
@@ -64,40 +100,23 @@
   </div>
 
 <script>
-/** Simple Security+ 701 themed Wordle clone (5-letter rounds) **/
+/** Security+ 701 themed Wordle clone (5-letter rounds) with on-screen keyboard **/
 
 const ROUNDS = [
-  {
-    topic: "Malware",
-    prompt: "Malicious code that activiates on a trigger (... bomb)",
-    answer: "LOGIC"
-  },
-  {
-    topic: "Threats",
-    prompt: "Attack where an attacker pretends to be someone else (impersonation): _____.",
-    answer: "SPOOF"
-  },
-  {
-    topic: "Threats",
-    prompt: "Attack that tricks users into clicking malicious links",
-    answer: "PHISH" // 5 letters so it fits the board (HMAC + S)
-  },
-  {
-    topic: "Authentication",
-    prompt: "A time-based code used in MFA is a: _____.",
-    answer: "TOKEN"
-  },
-  {
-    topic: "Cryptography",
-    prompt: "Random value added to passwords before hashing: _____.",
-    answer: "SALTS"
-  }
+  { topic: "Malware", prompt: "Malicious code that activates on a trigger (... bomb)", answer: "LOGIC" },
+  { topic: "Threats", prompt: "Attack where an attacker pretends to be someone else (impersonation)", answer: "SPOOF" },
+  { topic: "Threats", prompt: "Attack that tricks users into clicking malicious links", answer: "PHISH" },
+  { topic: "Authentication", prompt: "A time-based code used in MFA is a", answer: "TOKEN" },
+  { topic: "Cryptography", prompt: "Random value added to passwords before hashing", answer: "SALTS" }
 ];
 
 const WORD_LEN = 5;
 const MAX_GUESSES = 5;
 
 let round, answer, guesses, finished;
+
+// Track best-known status for each letter (absent < present < correct)
+const keyState = {}; // { A: "absent"|"present"|"correct" }
 
 const promptEl = document.getElementById("prompt");
 const lenEl = document.getElementById("len");
@@ -106,14 +125,87 @@ const topicEl = document.getElementById("topic");
 const gridEl = document.getElementById("grid");
 const msgEl = document.getElementById("msg");
 const guessEl = document.getElementById("guess");
+const keyboardEl = document.getElementById("keyboard");
 
+// ------- Keyboard build -------
+const KB_LAYOUT = [
+  ["Q","W","E","R","T","Y","U","I","O","P"],
+  ["A","S","D","F","G","H","J","K","L"],
+  ["ENTER","Z","X","C","V","B","N","M","DEL"]
+];
+
+function buildKeyboard() {
+  keyboardEl.innerHTML = "";
+  KB_LAYOUT.forEach(rowKeys => {
+    const row = document.createElement("div");
+    row.className = "kb-row";
+    rowKeys.forEach(k => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "key";
+      btn.dataset.key = k;
+      btn.textContent = k === "DEL" ? "⌫" : k;
+      if (k === "ENTER" || k === "DEL") btn.classList.add("wide");
+
+      btn.addEventListener("click", () => handleKeyPress(k));
+      row.appendChild(btn);
+    });
+    keyboardEl.appendChild(row);
+  });
+}
+
+function handleKeyPress(k) {
+  if (finished) return;
+
+  if (k === "ENTER") {
+    submitGuess();
+    return;
+  }
+  if (k === "DEL") {
+    guessEl.value = guessEl.value.slice(0, -1);
+    guessEl.focus();
+    return;
+  }
+  // Letter
+  if (/^[A-Z]$/.test(k)) {
+    if (guessEl.value.length < WORD_LEN) {
+      guessEl.value += k;
+    }
+    guessEl.focus();
+  }
+}
+
+function setKeyStatus(letter, status) {
+  const priority = { absent: 0, present: 1, correct: 2 };
+  const cur = keyState[letter];
+  if (!cur || priority[status] > priority[cur]) keyState[letter] = status;
+}
+
+function renderKeyboard() {
+  // Clear all status classes then apply best-known state
+  const keys = keyboardEl.querySelectorAll(".key");
+  keys.forEach(k => {
+    k.classList.remove("absent","present","correct");
+    const val = k.dataset.key;
+    if (/^[A-Z]$/.test(val) && keyState[val]) {
+      k.classList.add(keyState[val]);
+    }
+  });
+}
+
+// ------- Game logic -------
 function pickRound() {
   round = ROUNDS[Math.floor(Math.random() * ROUNDS.length)];
   answer = round.answer.toUpperCase();
   guesses = [];
   finished = false;
+
+  // reset keyboard state
+  for (const k in keyState) delete keyState[k];
+
   renderHeader();
   renderGrid();
+  renderKeyboard();
   setMessage("New round started.");
   guessEl.value = "";
   guessEl.focus();
@@ -146,7 +238,6 @@ function renderGrid() {
 
       row.appendChild(tile);
     }
-
     gridEl.appendChild(row);
   }
 }
@@ -164,10 +255,9 @@ function evaluateGuess(guess, answer) {
   const res = Array(WORD_LEN).fill("absent");
   const counts = {};
 
-  // Count letters in answer
   for (const ch of answer) counts[ch] = (counts[ch] || 0) + 1;
 
-  // First pass: correct
+  // correct pass
   for (let i = 0; i < WORD_LEN; i++) {
     if (guess[i] === answer[i]) {
       res[i] = "correct";
@@ -175,7 +265,7 @@ function evaluateGuess(guess, answer) {
     }
   }
 
-  // Second pass: present
+  // present pass
   for (let i = 0; i < WORD_LEN; i++) {
     if (res[i] === "correct") continue;
     const ch = guess[i];
@@ -186,6 +276,15 @@ function evaluateGuess(guess, answer) {
   }
 
   return res;
+}
+
+function applyKeyboardFromGuess(word, evals) {
+  for (let i = 0; i < WORD_LEN; i++) {
+    const ch = word[i];
+    const st = evals[i];
+    setKeyStatus(ch, st);
+  }
+  renderKeyboard();
 }
 
 function submitGuess() {
@@ -205,6 +304,8 @@ function submitGuess() {
   const evals = evaluateGuess(g, answer);
   guesses.push({ word: g, evals });
   renderGrid();
+  applyKeyboardFromGuess(g, evals);
+
   guessEl.value = "";
   guessEl.focus();
 
@@ -223,14 +324,31 @@ function submitGuess() {
   setMessage(`Attempts left: ${MAX_GUESSES - guesses.length}`);
 }
 
+// Buttons
 document.getElementById("submit").addEventListener("click", submitGuess);
 document.getElementById("new").addEventListener("click", pickRound);
-guessEl.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") submitGuess();
+
+// Physical keyboard support (optional + nice)
+document.addEventListener("keydown", (e) => {
+  if (finished) return;
+
+  const key = e.key;
+
+  if (key === "Enter") return submitGuess();
+  if (key === "Backspace") {
+    guessEl.value = guessEl.value.slice(0, -1);
+    return;
+  }
+
+  const letter = key.toUpperCase();
+  if (/^[A-Z]$/.test(letter)) {
+    if (guessEl.value.length < WORD_LEN) guessEl.value += letter;
+  }
 });
 
+// Init
+buildKeyboard();
 pickRound();
 </script>
 </body>
 </html>
-
